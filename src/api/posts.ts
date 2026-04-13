@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { ApiResponse, FeedResponse, Post } from '../types';
+import type { ApiResponse, FeedResponse, LikeData, Post } from '../types';
 
 export const fetchFeed = async (cursor?: string | null): Promise<FeedResponse> => {
   const params: Record<string, string | number> = { limit: 10 };
@@ -10,10 +10,11 @@ export const fetchFeed = async (cursor?: string | null): Promise<FeedResponse> =
 };
 
 export const fetchPost = async (id: string): Promise<Post> => {
-  const response = await apiClient.get<ApiResponse<Post>>(`/posts/${id}`);
-  return response.data.data;
+  const response = await apiClient.get<ApiResponse<{ post: Post }>>(`/posts/${id}`);
+  return response.data.data.post;
 };
 
-export const toggleLike = async (id: string): Promise<void> => {
-  await apiClient.post(`/posts/${id}/like`);
+export const toggleLike = async (id: string): Promise<LikeData> => {
+  const response = await apiClient.post<ApiResponse<LikeData>>(`/posts/${id}/like`);
+  return response.data.data;
 };

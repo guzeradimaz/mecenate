@@ -35,6 +35,11 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+export interface LikeData {
+  isLiked: boolean;
+  likesCount: number;
+}
+
 export interface ApiError {
   ok: false;
   error: {

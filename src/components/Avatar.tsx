@@ -1,15 +1,15 @@
-import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
-import { avatarSize, colors, radius, typography } from '../tokens';
+import React, { memo } from 'react';
+import { Image } from 'expo-image';
+import { StyleSheet, Text, View } from 'react-native';
+import { colors, layout } from '../tokens';
 
 interface AvatarProps {
   uri: string | null;
   displayName: string;
-  size?: 'sm' | 'md' | 'lg';
 }
 
-export const Avatar: React.FC<AvatarProps> = ({ uri, displayName, size = 'md' }) => {
-  const dim = avatarSize[size];
+export const Avatar: React.FC<AvatarProps> = memo(({ uri, displayName }) => {
+  const size = layout.avatarSize;
   const initials = displayName
     .split(' ')
     .map((w) => w[0])
@@ -18,18 +18,20 @@ export const Avatar: React.FC<AvatarProps> = ({ uri, displayName, size = 'md' })
     .toUpperCase();
 
   return (
-    <View style={[styles.container, { width: dim, height: dim, borderRadius: dim / 2 }]}>
+    <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
       {uri ? (
         <Image
           source={{ uri }}
-          style={[styles.image, { width: dim, height: dim, borderRadius: dim / 2 }]}
+          style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]}
+          contentFit="cover"
+          cachePolicy="memory-disk"
         />
       ) : (
-        <Text style={[styles.initials, { fontSize: dim * 0.38 }]}>{initials}</Text>
+        <Text style={[styles.initials, { fontSize: size * 0.34 }]}>{initials}</Text>
       )}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -39,10 +41,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   image: {
-    resizeMode: 'cover',
+    overflow: 'hidden',
   },
   initials: {
     color: colors.primary,
-    fontWeight: typography.semibold,
+    fontWeight: '700',
+    fontFamily: 'Manrope_700Bold',
   },
 });

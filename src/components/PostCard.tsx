@@ -1,213 +1,342 @@
-import React, { useCallback } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
+import { AntDesign, Ionicons } from '@expo/vector-icons';
 import { observer } from 'mobx-react-lite';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toggleLike } from '../api/posts';
 import { feedStore } from '../store/FeedStore';
-import { FEED_QUERY_KEY } from '../hooks/useFeed';
 import { Avatar } from './Avatar';
-import { LockedBanner } from './LockedBanner';
 import type { Post } from '../types';
-import { colors, radius, shadows, spacing, typography } from '../tokens';
+import { colors, layout, spacing, typography } from '../tokens';
 
-interface PostCardProps {
-  post: Post;
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const formatCount = (n: number): string =>
+  n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+
+// ─── PostCardActions — only this re-renders on like state changes ────────────
+
+interface ActionsProps {
+  postId: string;
+  commentsCount: number;
 }
 
-const formatDate = (iso: string): string => {
-  const date = new Date(iso);
-  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-};
+const PostCardActions: React.FC<ActionsProps> = observer(({ postId, commentsCount }) => {
+  const isLiked = feedStore.isLiked(postId);
+  const likesCount = feedStore.getLikesCount(postId);
 
-const formatCount = (n: number): string => {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-};
-
-export const PostCard: React.FC<PostCardProps> = observer(({ post }) => {
-  feedStore.initPost(post);
-
-  const queryClient = useQueryClient();
-
-  const likeMutation = useMutation({
-    mutationFn: () => toggleLike(post.id),
-    onMutate: () => {
-      feedStore.toggleLike(post.id);
-    },
-    onError: () => {
-      feedStore.toggleLike(post.id); // revert
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: FEED_QUERY_KEY });
-    },
+  const mutation = useMutation({
+    mutationFn: () => toggleLike(postId),
+    onMutate: () => feedStore.optimisticToggle(postId),
+    onError: () => feedStore.optimisticToggle(postId),
+    onSuccess: (data) => feedStore.applyLikeResult(postId, data),
   });
 
-  const handleLike = useCallback(() => {
-    if (!likeMutation.isPending) {
-      likeMutation.mutate();
-    }
-  }, [likeMutation]);
+  // Stable ref so handleLike closure doesn't change on every mutation state update
+  const isPendingRef = useRef(false);
+  isPendingRef.current = mutation.isPending;
 
-  const isLiked = feedStore.isLiked(post.id);
-  const likesCount = feedStore.getLikesCount(post.id);
+  const handleLike = useCallback(() => {
+    if (!isPendingRef.current) mutation.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <View style={styles.card}>
-      {/* Author row */}
-      <View style={styles.authorRow}>
-        <Avatar uri={post.author.avatarUrl} displayName={post.author.displayName} size="md" />
-        <View style={styles.authorInfo}>
-          <View style={styles.nameRow}>
-            <Text style={styles.displayName} numberOfLines={1}>
-              {post.author.displayName}
-            </Text>
-            {post.author.isVerified && (
-              <Text style={styles.verified}>✓</Text>
-            )}
-          </View>
-          <Text style={styles.date}>{formatDate(post.createdAt)}</Text>
-        </View>
-        {post.tier === 'paid' && (
-          <View style={styles.paidBadge}>
-            <Text style={styles.paidBadgeText}>Платно</Text>
-          </View>
-        )}
-      </View>
+    <View style={styles.buttons}>
+      <TouchableOpacity
+        style={[styles.actionBtn, isLiked && styles.actionBtnLiked]}
+        onPress={handleLike}
+        activeOpacity={0.8}
+        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+      >
+        <AntDesign
+          name="heart"
+          size={16}
+          color={isLiked ? colors.likeActiveIcon : colors.textSecondary}
+        />
+        <Text style={[styles.count, isLiked && styles.countLiked]}>
+          {formatCount(likesCount)}
+        </Text>
+      </TouchableOpacity>
 
-      {/* Title */}
-      <Text style={styles.title} numberOfLines={3}>
-        {post.title}
-      </Text>
-
-      {/* Cover image */}
-      {post.coverUrl && (
-        <Image source={{ uri: post.coverUrl }} style={styles.cover} resizeMode="cover" />
-      )}
-
-      {/* Body / Locked */}
-      {post.tier === 'paid' ? (
-        <LockedBanner />
-      ) : (
-        post.preview || post.body ? (
-          <Text style={styles.preview} numberOfLines={4}>
-            {post.preview || post.body}
-          </Text>
-        ) : null
-      )}
-
-      {/* Stats */}
-      <View style={styles.statsRow}>
-        <TouchableOpacity style={styles.statBtn} onPress={handleLike} activeOpacity={0.7}>
-          <Text style={[styles.statIcon, isLiked && styles.likedIcon]}>
-            {isLiked ? '❤️' : '🤍'}
-          </Text>
-          <Text style={[styles.statText, isLiked && styles.likedText]}>
-            {formatCount(likesCount)}
-          </Text>
-        </TouchableOpacity>
-        <View style={styles.statBtn}>
-          <Text style={styles.statIcon}>💬</Text>
-          <Text style={styles.statText}>{formatCount(post.commentsCount)}</Text>
-        </View>
+      <View style={styles.actionBtn}>
+        <Ionicons name="chatbubble-outline" size={16} color={colors.textSecondary} />
+        <Text style={styles.count}>{formatCount(commentsCount)}</Text>
       </View>
     </View>
   );
 });
 
+// ─── PaidOverlay — static, no state ─────────────────────────────────────────
+
+const PaidOverlay: React.FC = memo(() => (
+  <View style={styles.overlay}>
+    <View style={styles.paidContent}>
+      <View style={styles.paidIconWrap}>
+        <Ionicons name="cash-outline" size={20} color={colors.textInverse} />
+      </View>
+      <Text style={styles.paidText}>
+        {'Контент скрыт пользователем.\nДоступ откроется после доната'}
+      </Text>
+      <TouchableOpacity style={styles.donateBtn} activeOpacity={0.85}>
+        <Text style={styles.donateBtnText}>Отправить донат</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+));
+
+// ─── PostCard ────────────────────────────────────────────────────────────────
+
+interface PostCardProps {
+  post: Post;
+  onPress?: (post: Post) => void;
+}
+
+// memo prevents re-render when parent list re-renders (e.g. pagination)
+// Observer is NOT used here — MobX reactivity is isolated to PostCardActions
+export const PostCard: React.FC<PostCardProps> = memo(({ post, onPress }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  // Initialize store once on mount; safe side-effect outside render
+  useEffect(() => {
+    feedStore.initPost(post);
+    // intentionally omit post from deps — only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stable press handler — onPress and post refs are both stable,
+  // so this callback reference won't change between renders → memo works correctly
+  const handlePress = useCallback(() => {
+    onPress?.(post);
+  }, [onPress, post]);
+
+  const isPaid = post.tier === 'paid';
+  const bodyText = post.preview || post.body;
+
+  return (
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={onPress ? 0.92 : 1}
+      style={styles.card}
+    >
+      {/* Author row */}
+      <View style={styles.authorRow}>
+        <Avatar uri={post.author.avatarUrl} displayName={post.author.displayName} />
+        <Text style={styles.authorName} numberOfLines={1}>
+          {post.author.displayName}
+        </Text>
+      </View>
+
+      {/* Cover image — full bleed */}
+      <View style={styles.imageWrap}>
+        {post.coverUrl ? (
+          <Image
+            source={{ uri: post.coverUrl }}
+            style={styles.image}
+            contentFit="cover"
+            cachePolicy="disk"
+          />
+        ) : (
+          <View style={[styles.image, styles.imagePlaceholder]} />
+        )}
+        {isPaid && <PaidOverlay />}
+      </View>
+
+      {/* Content */}
+      {isPaid ? (
+        <View style={styles.skeletonBlock}>
+          <View style={[styles.skeletonLine, styles.skeletonShort]} />
+          <View style={[styles.skeletonLine, styles.skeletonFull]} />
+        </View>
+      ) : (
+        <>
+          <Text style={styles.title}>{post.title}</Text>
+
+          {bodyText ? (
+            <>
+              <Text
+                style={styles.body}
+                numberOfLines={expanded ? undefined : 2}
+              >
+                {bodyText}
+              </Text>
+              {!expanded && bodyText.length > 80 && (
+                <TouchableOpacity
+                  onPress={() => setExpanded(true)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
+                  <Text style={styles.showMoreText}>Показать еще</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : null}
+
+          <PostCardActions postId={post.id} commentsCount={post.commentsCount} />
+        </>
+      )}
+    </TouchableOpacity>
+  );
+});
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    padding: spacing.lg,
-    ...shadows.card,
+    borderRadius: layout.cardRadius,
+    overflow: 'hidden',
+    paddingHorizontal: layout.cardPaddingH,
+    paddingTop: layout.cardPaddingV,
+    paddingBottom: layout.cardPaddingV,
+    marginBottom: layout.cardGap,
   },
+
+  // Author
   authorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
     gap: spacing.md,
+    marginBottom: layout.cardGap,
   },
-  authorInfo: {
+  authorName: {
     flex: 1,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  displayName: {
-    fontSize: typography.md,
-    fontWeight: typography.semibold,
+    fontSize: typography.authorName.fontSize,
+    fontWeight: typography.authorName.fontWeight as '700',
+    lineHeight: typography.authorName.lineHeight,
     color: colors.textPrimary,
-    flex: 1,
+    fontFamily: 'Manrope_700Bold',
   },
-  verified: {
-    fontSize: typography.sm,
-    color: colors.primary,
-    fontWeight: typography.bold,
+
+  // Image
+  imageWrap: {
+    marginHorizontal: -layout.cardPaddingH,
   },
-  date: {
-    fontSize: typography.xs,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  paidBadge: {
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  paidBadgeText: {
-    fontSize: typography.xs,
-    fontWeight: typography.semibold,
-    color: colors.primary,
-  },
-  title: {
-    fontSize: typography.lg,
-    fontWeight: typography.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-    lineHeight: typography.lineHeightLg,
-  },
-  cover: {
+  image: {
     width: '100%',
-    height: 200,
-    borderRadius: radius.md,
-    marginBottom: spacing.md,
-    backgroundColor: colors.surfaceSecondary,
+    aspectRatio: 1,
+    backgroundColor: colors.skeletonBg,
   },
-  preview: {
-    fontSize: typography.md,
-    color: colors.textSecondary,
-    lineHeight: typography.lineHeightMd,
-    marginBottom: spacing.md,
+  imagePlaceholder: {
+    backgroundColor: colors.skeletonBg,
   },
-  statsRow: {
+
+  // Text
+  title: {
+    fontSize: typography.title.fontSize,
+    fontWeight: typography.title.fontWeight as '700',
+    lineHeight: typography.title.lineHeight,
+    color: colors.textPrimary,
+    fontFamily: 'Manrope_700Bold',
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  body: {
+    fontSize: typography.body.fontSize,
+    fontWeight: typography.body.fontWeight as '500',
+    lineHeight: typography.body.lineHeight,
+    color: colors.textPrimary,
+    fontFamily: 'Manrope_500Medium',
+  },
+  showMoreText: {
+    marginTop: 2,
+    fontSize: typography.showMore.fontSize,
+    fontWeight: typography.showMore.fontWeight as '500',
+    lineHeight: typography.showMore.lineHeight,
+    color: colors.primary,
+    fontFamily: 'Manrope_500Medium',
+  },
+
+  // Action buttons
+  buttons: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xl,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
+    gap: spacing.sm,
+    marginTop: layout.cardGap,
   },
-  statBtn: {
+  actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    backgroundColor: colors.buttonBg,
+    borderRadius: 9999,
+    paddingTop: 6,
+    paddingBottom: 6,
+    paddingLeft: 6,
+    paddingRight: spacing.md,
+    height: layout.buttonHeight,
   },
-  statIcon: {
-    fontSize: 16,
+  actionBtnLiked: {
+    backgroundColor: colors.likeActiveBg,
   },
-  statText: {
-    fontSize: typography.sm,
+  count: {
+    fontSize: typography.count.fontSize,
+    fontWeight: typography.count.fontWeight as '700',
+    lineHeight: typography.count.lineHeight,
     color: colors.textSecondary,
-    fontWeight: typography.medium,
+    fontFamily: 'Manrope_700Bold',
   },
-  likedIcon: {},
-  likedText: {
-    color: colors.like,
-    fontWeight: typography.semibold,
+  countLiked: {
+    color: colors.likeActiveText,
+  },
+
+  // Paid overlay
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.overlayDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paidContent: {
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
+  paidIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paidText: {
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 20,
+    color: colors.textInverse,
+    textAlign: 'center',
+    fontFamily: 'Manrope_600SemiBold',
+  },
+  donateBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingHorizontal: spacing.xxxl,
+    paddingVertical: layout.cardGap,
+  },
+  donateBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 26,
+    color: colors.textInverse,
+    fontFamily: 'Manrope_600SemiBold',
+  },
+
+  // Paid skeleton
+  skeletonBlock: {
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+  },
+  skeletonLine: {
+    backgroundColor: colors.skeletonBg,
+    borderRadius: 22,
+  },
+  skeletonShort: {
+    height: 26,
+    width: '45%',
+  },
+  skeletonFull: {
+    height: 40,
+    width: '100%',
   },
 });

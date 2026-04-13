@@ -8,15 +8,24 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeed } from '../hooks/useFeed';
 import { PostCard } from '../components/PostCard';
 import { PostCardSkeleton } from '../components/PostCardSkeleton';
 import type { Post } from '../types';
-import { colors, spacing, typography } from '../tokens';
+import { colors, spacing } from '../tokens';
 
-const SKELETONS = Array.from({ length: 4 }, (_, i) => `skeleton-${i}`);
+const SKELETONS = [0, 1, 2];
+const keyExtractor = (item: Post) => item.id;
+const REFRESH_COLORS = [colors.primary]; // stable reference, avoids new array each render
 
-export const FeedScreen: React.FC = () => {
+interface FeedScreenProps {
+  onPostPress: (post: Post) => void;
+}
+
+export const FeedScreen: React.FC<FeedScreenProps> = ({ onPostPress }) => {
+  const insets = useSafeAreaInsets();
+
   const {
     data,
     isLoading,
@@ -34,80 +43,82 @@ export const FeedScreen: React.FC = () => {
   );
 
   const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const renderItem = useCallback(
-    ({ item }: { item: Post }) => <PostCard post={item} />,
-    [],
-  );
+  const handleRefetch = useCallback(() => refetch(), [refetch]);
 
-  const keyExtractor = useCallback((item: Post) => item.id, []);
+  // onPostPress (from App) is stable → PostCard.memo correctly skips re-renders on pagination
+  const renderItem = useCallback(({ item }: { item: Post }) => (
+    <PostCard post={item} onPress={onPostPress} />
+  ), [onPostPress]);
 
-  const ListFooter = useMemo(() => {
-    if (!isFetchingNextPage) return null;
+  // edgeToEdgeEnabled: true in app.json — last items would be hidden under Android nav bar
+  const listContentStyle = useMemo(() => ({
+    padding: spacing.lg,
+    paddingBottom: insets.bottom + spacing.lg,
+  }), [insets.bottom]);
+
+  const refreshControl = useMemo(() => (
+    <RefreshControl
+      refreshing={isRefetching && !isFetchingNextPage}
+      onRefresh={handleRefetch}
+      tintColor={colors.primary}
+      colors={REFRESH_COLORS}
+    />
+  ), [isRefetching, isFetchingNextPage, handleRefetch]);
+
+  if (isLoading) {
     return (
-      <View style={styles.footer}>
-        <ActivityIndicator size="small" color={colors.primary} />
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.skeletonList}>
+          {SKELETONS.map((i) => <PostCardSkeleton key={i} />)}
+        </View>
       </View>
     );
-  }, [isFetchingNextPage]);
+  }
 
-  const ListEmpty = useMemo(() => {
-    if (isLoading) {
-      return (
-        <View>
-          {SKELETONS.map((k) => (
-            <PostCardSkeleton key={k} />
-          ))}
-        </View>
-      );
-    }
-    if (isError) {
-      return (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorIcon}>⚠️</Text>
+  if (isError) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.errorCard}>
+          <View style={styles.illustrationWrap}>
+            <Text style={styles.illustration}>🥺</Text>
+          </View>
           <Text style={styles.errorTitle}>Не удалось загрузить публикации</Text>
-          <Text style={styles.errorSubtitle}>Проверьте интернет-соединение и попробуйте снова</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={handleRefetch}
+            activeOpacity={0.85}
+          >
             <Text style={styles.retryText}>Повторить</Text>
           </TouchableOpacity>
         </View>
-      );
-    }
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyIcon}>📭</Text>
-        <Text style={styles.emptyText}>Публикаций пока нет</Text>
       </View>
     );
-  }, [isLoading, isError, refetch]);
+  }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Лента</Text>
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <FlatList
         data={posts}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+        refreshControl={refreshControl}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.4}
-        ListFooterComponent={ListFooter}
-        ListEmptyComponent={ListEmpty}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefetching && !isFetchingNextPage}
-            onRefresh={refetch}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
-          />
+        contentContainerStyle={listContentStyle}
+        ListFooterComponent={
+          isFetchingNextPage ? (
+            <View style={styles.footer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : null
         }
         showsVerticalScrollIndicator={false}
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={10}
       />
     </View>
   );
@@ -118,75 +129,55 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerTitle: {
-    fontSize: typography.xl,
-    fontWeight: typography.bold,
-    color: colors.textPrimary,
-  },
-  listContent: {
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxxl,
-    flexGrow: 1,
+  skeletonList: {
+    padding: spacing.lg,
   },
   footer: {
     paddingVertical: spacing.xl,
     alignItems: 'center',
   },
-  errorContainer: {
-    flex: 1,
+
+  // ─── Error state ─────────────────────────────────────────────────────────
+  errorCard: {
+    margin: spacing.lg,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  illustrationWrap: {
+    width: 112,
+    height: 112,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xxxl,
-    paddingTop: 80,
-    gap: spacing.md,
   },
-  errorIcon: {
-    fontSize: 48,
-    marginBottom: spacing.sm,
+  illustration: {
+    fontSize: 76,
+    lineHeight: 90,
   },
   errorTitle: {
-    fontSize: typography.lg,
-    fontWeight: typography.semibold,
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
+    fontFamily: 'Manrope_700Bold',
+    lineHeight: 24,
   },
-  errorSubtitle: {
-    fontSize: typography.sm,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: typography.lineHeightSm,
-  },
-  retryButton: {
-    marginTop: spacing.md,
+  retryBtn: {
     backgroundColor: colors.primary,
-    paddingHorizontal: spacing.xxl,
-    paddingVertical: spacing.md,
-    borderRadius: 50,
+    borderRadius: 14,
+    height: 42,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   retryText: {
     color: colors.textInverse,
-    fontSize: typography.md,
-    fontWeight: typography.semibold,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 100,
-    gap: spacing.md,
-  },
-  emptyIcon: {
-    fontSize: 48,
-  },
-  emptyText: {
-    fontSize: typography.md,
-    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'Manrope_600SemiBold',
   },
 });
